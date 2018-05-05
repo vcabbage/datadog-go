@@ -29,7 +29,6 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -103,7 +102,8 @@ type Client struct {
 	done     chan struct{}
 
 	mu       sync.Mutex
-	commands net.Buffers
+	buffer   []byte
+	commands int
 }
 
 // New returns a pointer to a new Client given an addr in the format "hostname:port" or
@@ -122,6 +122,10 @@ func NewWithWriter(w Writer) *Client {
 // NewBuffered returns a Client that buffers its output and sends it in chunks.
 // Buflen is the length of the buffer in number of commands.
 func NewBuffered(addr string, bufLen int) (*Client, error) {
+	if bufLen == 1 {
+		return New(addr)
+	}
+
 	w, err := newWriter(addr)
 	if err != nil {
 		return nil, err
@@ -130,7 +134,6 @@ func NewBuffered(addr string, bufLen int) (*Client, error) {
 	c := &Client{
 		writer:       w,
 		bufferLength: bufLen,
-		commands:     make([][]byte, 0, bufLen),
 		flushTime:    100 * time.Millisecond,
 		done:         make(chan struct{}),
 	}
@@ -147,7 +150,7 @@ func newWriter(addr string) (Writer, error) {
 }
 
 // format a message from its name, value, tags and rate. Also adds global namespace and tags.
-func (c *Client) format(name string, value interface{}, suffix []byte, tags []string, rate float64) []byte {
+func (c *Client) format(name string, value interface{}, suffix []byte, tags []string, rate float64) error {
 	// preallocated buffer, stack allocated as long as it doesn't escape
 	buf := make([]byte, 0, 200)
 
@@ -178,9 +181,35 @@ func (c *Client) format(name string, value interface{}, suffix []byte, tags []st
 	}
 
 	buf = appendTagString(buf, c.Tags, tags)
+	buf = append(buf, '\n')
 
-	// non-zeroing copy to avoid referencing a larger than necessary underlying array
-	return append([]byte(nil), buf...)
+	return c.append(buf)
+}
+
+func (c *Client) append(buf []byte) error {
+	// return an error if message is bigger than MaxUDPPayloadSize
+	if len(buf) > MaxUDPPayloadSize {
+		return errors.New("message size exceeds MaxUDPPayloadSize")
+	}
+
+	if c.bufferLength < 2 {
+		_, err := c.writer.Write(buf)
+		return err
+	}
+
+	c.mu.Lock()
+	if len(c.buffer)+len(buf) > MaxUDPPayloadSize {
+		err := c.flushLocked(true)
+		if err != nil {
+			return err
+		}
+	}
+	c.buffer = append(c.buffer, buf...)
+	c.commands++
+	err := c.flushLocked(false)
+	c.mu.Unlock()
+
+	return err
 }
 
 // SetWriteTimeout allows the user to set a custom UDS write timeout. Not supported for UDP.
@@ -199,27 +228,13 @@ func (c *Client) watch() {
 		select {
 		case <-ticker.C:
 			c.mu.Lock()
-			if len(c.commands) > 0 {
-				// FIXME: eating error here
-				c.flushLocked()
-			}
+			// FIXME: eating error here
+			c.flushLocked(true)
 			c.mu.Unlock()
 		case <-c.done:
 			return
 		}
 	}
-}
-
-func (c *Client) append(cmd []byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.commands = append(c.commands, cmd)
-	if len(c.commands) < c.bufferLength {
-		return nil
-	}
-
-	return c.flushLocked()
 }
 
 // Flush forces a flush of the pending commands in the buffer
@@ -229,34 +244,20 @@ func (c *Client) Flush() error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.flushLocked()
+	return c.flushLocked(true)
 }
 
 // flush the commands in the buffer.
 //
 // c.mu must be held by caller.
-func (c *Client) flushLocked() error {
-	_, err := c.commands.WriteTo(c.writer)
-	c.commands = c.commands[:0]
-	return err
-}
-
-func (c *Client) sendMsg(msg []byte) error {
-	// return an error if message is bigger than MaxUDPPayloadSize
-	if len(msg) > MaxUDPPayloadSize {
-		return errors.New("message size exceeds MaxUDPPayloadSize")
-	}
-
-	// if this client is buffered, then we'll just append this
-	if c.bufferLength > 0 {
-		return c.append(msg)
-	}
-
-	_, err := c.writer.Write(msg)
-
-	if c.SkipErrors {
+func (c *Client) flushLocked(force bool) error {
+	if !force && (c.commands == 0 || c.commands < c.bufferLength) {
 		return nil
 	}
+
+	_, err := c.writer.Write(c.buffer)
+	c.buffer = c.buffer[:0]
+	c.commands = 0
 	return err
 }
 
@@ -268,8 +269,7 @@ func (c *Client) send(name string, value interface{}, suffix []byte, tags []stri
 	if rate < 1 && rand.Float64() > rate {
 		return nil
 	}
-	data := c.format(name, value, suffix, tags, rate)
-	return c.sendMsg(data)
+	return c.format(name, value, suffix, tags, rate)
 }
 
 // Gauge measures the value of a metric at a particular time.
@@ -327,7 +327,8 @@ func (c *Client) Event(e *Event) error {
 	if err != nil {
 		return err
 	}
-	return c.sendMsg([]byte(stat))
+
+	return c.append([]byte(stat))
 }
 
 // SimpleEvent sends an event with the provided title and text.
@@ -345,7 +346,8 @@ func (c *Client) ServiceCheck(sc *ServiceCheck) error {
 	if err != nil {
 		return err
 	}
-	return c.sendMsg([]byte(stat))
+
+	return c.append([]byte(stat))
 }
 
 // SimpleServiceCheck sends an serviceCheck with the provided name and status.
@@ -544,7 +546,7 @@ func (sc ServiceCheck) Check() error {
 	if len(sc.Name) == 0 {
 		return fmt.Errorf("statsd.ServiceCheck name is required")
 	}
-	if byte(sc.Status) < 0 || byte(sc.Status) > 3 {
+	if sc.Status > 3 {
 		return fmt.Errorf("statsd.ServiceCheck status has invalid value")
 	}
 	return nil

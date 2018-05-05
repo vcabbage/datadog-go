@@ -12,20 +12,16 @@ type udpWriter struct {
 }
 
 // New returns a pointer to a new udpWriter given an addr in the format "hostname:port".
-func newUDPWriter(addr string) (*udpWriter, error) {
+func newUDPWriter(addr string) (udpWriter, error) {
 	udpAddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
-		return nil, err
+		return udpWriter{}, err
 	}
 	conn, err := net.DialUDP("udp", nil, udpAddr)
-	if err != nil {
-		return nil, err
-	}
-	writer := &udpWriter{UDPConn: conn}
-	return writer, nil
+	return udpWriter{UDPConn: conn}, err
 }
 
 // SetWriteTimeout is not needed for UDP, returns error
-func (w *udpWriter) SetWriteTimeout(d time.Duration) error {
+func (udpWriter) SetWriteTimeout(d time.Duration) error {
 	return errors.New("SetWriteTimeout: not supported for UDP connections")
 }

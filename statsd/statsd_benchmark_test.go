@@ -105,7 +105,7 @@ func BenchmarkClientFormat(b *testing.B) {
 			b.ResetTimer()
 
 			for n := 0; n < b.N; n++ {
-				FormatSink = c.format(tt.name, tt.value, tt.suffix, tt.tags, 1.0)
+				c.format(tt.name, tt.value, tt.suffix, tt.tags, 1.0)
 			}
 		})
 	}
@@ -144,9 +144,11 @@ func BenchmarkFlush(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 
-			for n := 0; n < b.N; n++ {
-				c.send(tt.name, tt.value, tt.suffix, tt.tags, 1.0)
-			}
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					c.send(tt.name, tt.value, tt.suffix, tt.tags, 1.0)
+				}
+			})
 		})
 	}
 }
@@ -163,6 +165,7 @@ func BenchmarkFlushBatch(b *testing.B) {
 	}{
 		// {"", nil, "test.gauge", 1.0, gaugeSuffix, nil},
 		// {"", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA"}},
+		{1, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
 		{5, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
 		{10, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
 		{100, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
@@ -179,7 +182,7 @@ func BenchmarkFlushBatch(b *testing.B) {
 	b.ReportAllocs()
 
 	for i, tt := range tests {
-		b.Run(strconv.Itoa(i), func(b *testing.B) {
+		b.Run(fmt.Sprintf("%d-%d", i, tt.batchSize), func(b *testing.B) {
 			c, err := NewBuffered("127.0.0.1:56789", tt.batchSize)
 			if err != nil {
 				b.Fatal(err)
@@ -188,9 +191,11 @@ func BenchmarkFlushBatch(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 
-			for n := 0; n < b.N; n++ {
-				c.send(tt.name, tt.value, tt.suffix, tt.tags, 1.0)
-			}
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					c.send(tt.name, tt.value, tt.suffix, tt.tags, 1.0)
+				}
+			})
 		})
 	}
 }
