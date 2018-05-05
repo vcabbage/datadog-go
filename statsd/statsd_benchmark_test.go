@@ -81,12 +81,9 @@ func BenchmarkClientFormat(b *testing.B) {
 		tags            []string
 	}{
 		{"", nil, "test.gauge", 1.0, gaugeSuffix, nil},
-		{"", nil, "test.gauge", 1.0, gaugeSuffix, nil},
 		{"", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA"}},
 		{"", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
-		{"", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA"}},
 		{"", nil, "test.count", int64(1), countSuffix, []string{"tagA"}},
-		{"", nil, "test.count", int64(-1), countSuffix, []string{"tagA"}},
 		{"", nil, "test.histogram", 2.3, histogramSuffix, []string{"tagA"}},
 		{"", nil, "test.distribution", 2.3, distributionSuffix, []string{"tagA"}},
 		{"", nil, "test.set", "uuid", setSuffix, []string{"tagA"}},
