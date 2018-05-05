@@ -74,9 +74,9 @@ var (
 	timingSuffix       = []byte("|ms")
 )
 
-// A statsdWriter offers a standard interface regardless of the underlying
+// A Writer offers a standard interface regardless of the underlying
 // protocol. For now UDS and UPD writers are available.
-type statsdWriter interface {
+type Writer interface {
 	Write(data []byte) (n int, err error)
 	SetWriteTimeout(time.Duration) error
 	Close() error
@@ -86,7 +86,7 @@ type statsdWriter interface {
 // use one Client from multiple goroutines simultaneously.
 type Client struct {
 	// Writer handles the underlying networking protocol
-	writer statsdWriter
+	writer Writer
 	// Namespace to prepend to all statsd calls
 	Namespace string
 	// Tags are global tags to be added to every statsd call
@@ -121,7 +121,7 @@ func New(addr string) (*Client, error) {
 
 // NewWithWriter creates a new Client with given writer. Writer is a
 // io.WriteCloser + SetWriteTimeout(time.Duration) error
-func NewWithWriter(w statsdWriter) (*Client, error) {
+func NewWithWriter(w Writer) (*Client, error) {
 	client := &Client{writer: w, SkipErrors: false}
 	return client, nil
 }
