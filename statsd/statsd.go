@@ -98,14 +98,12 @@ type Client struct {
 	bufferLength int
 
 	flushTime time.Duration
-	buffer    bytes.Buffer
-	writev    bool
 
 	doneOnce sync.Once
 	done     chan struct{}
 
 	mu       sync.Mutex
-	commands [][]byte
+	commands net.Buffers
 }
 
 // New returns a pointer to a new Client given an addr in the format "hostname:port" or
@@ -224,53 +222,6 @@ func (c *Client) append(cmd []byte) error {
 	return c.flushLocked()
 }
 
-func (c *Client) joinMaxSize(cmds [][]byte, sep string, maxSize int) ([][]byte, []int) {
-	c.buffer.Reset() //clear buffer
-
-	var frames [][]byte
-	var ncmds []int
-	sepBytes := []byte(sep)
-	sepLen := len(sep)
-
-	elem := 0
-	for _, cmd := range cmds {
-		needed := len(cmd)
-
-		if elem != 0 {
-			needed = needed + sepLen
-		}
-
-		if c.buffer.Len()+needed <= maxSize {
-			if elem != 0 {
-				c.buffer.Write(sepBytes)
-			}
-			c.buffer.Write(cmd)
-			elem++
-		} else {
-			frames = append(frames, copyAndResetBuffer(&c.buffer))
-			ncmds = append(ncmds, elem)
-			// if cmd is bigger than maxSize it will get flushed on next loop
-			c.buffer.Write(cmd)
-			elem = 1
-		}
-	}
-
-	//add whatever is left! if there's actually something
-	if c.buffer.Len() > 0 {
-		frames = append(frames, copyAndResetBuffer(&c.buffer))
-		ncmds = append(ncmds, elem)
-	}
-
-	return frames, ncmds
-}
-
-func copyAndResetBuffer(buf *bytes.Buffer) []byte {
-	tmpBuf := make([]byte, buf.Len())
-	copy(tmpBuf, buf.Bytes())
-	buf.Reset()
-	return tmpBuf
-}
-
 // Flush forces a flush of the pending commands in the buffer
 func (c *Client) Flush() error {
 	if c == nil {
@@ -285,33 +236,8 @@ func (c *Client) Flush() error {
 //
 // c.mu must be held by caller.
 func (c *Client) flushLocked() error {
-	if c.writev {
-		bufs := net.Buffers(c.commands)
-		_, err := bufs.WriteTo(c.writer)
-		c.commands = c.commands[:0]
-		return err
-	}
-
-	frames, flushable := c.joinMaxSize(c.commands, "\n", OptimalPayloadSize)
-	cmdsFlushed := 0
-	var err error
-	for i, data := range frames {
-		_, e := c.writer.Write(data)
-		if e != nil {
-			err = e
-			break
-		}
-		cmdsFlushed += flushable[i]
-	}
-
-	// clear the slice with a slice op, doesn't realloc
-	if cmdsFlushed == len(c.commands) {
-		c.commands = c.commands[:0]
-	} else {
-		//this case will cause a future realloc...
-		// drop problematic command though (sorry).
-		c.commands = c.commands[cmdsFlushed+1:]
-	}
+	_, err := c.commands.WriteTo(c.writer)
+	c.commands = c.commands[:0]
 	return err
 }
 

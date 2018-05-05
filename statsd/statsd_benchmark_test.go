@@ -180,33 +180,17 @@ func BenchmarkFlushBatch(b *testing.B) {
 
 	for i, tt := range tests {
 		b.Run(strconv.Itoa(i), func(b *testing.B) {
-			b.Run("join", func(b *testing.B) {
-				c, err := NewBuffered("127.0.0.1:56789", tt.batchSize)
-				if err != nil {
-					b.Fatal(err)
-				}
+			c, err := NewBuffered("127.0.0.1:56789", tt.batchSize)
+			if err != nil {
+				b.Fatal(err)
+			}
 
-				b.ReportAllocs()
-				b.ResetTimer()
+			b.ReportAllocs()
+			b.ResetTimer()
 
-				for n := 0; n < b.N; n++ {
-					c.send(tt.name, tt.value, tt.suffix, tt.tags, 1.0)
-				}
-			})
-			b.Run("writev", func(b *testing.B) {
-				c, err := NewBuffered("127.0.0.1:56789", tt.batchSize)
-				if err != nil {
-					b.Fatal(err)
-				}
-				c.writev = true
-
-				b.ReportAllocs()
-				b.ResetTimer()
-
-				for n := 0; n < b.N; n++ {
-					c.send(tt.name, tt.value, tt.suffix, tt.tags, 1.0)
-				}
-			})
+			for n := 0; n < b.N; n++ {
+				c.send(tt.name, tt.value, tt.suffix, tt.tags, 1.0)
+			}
 		})
 	}
 }
