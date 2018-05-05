@@ -110,3 +110,103 @@ func BenchmarkClientFormat(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkFlush(b *testing.B) {
+	var tests = []struct {
+		globalNamespace string
+		globalTags      []string
+		name            string
+		value           interface{}
+		suffix          []byte
+		tags            []string
+	}{
+		// {"", nil, "test.gauge", 1.0, gaugeSuffix, nil},
+		// {"", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA"}},
+		{"", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		// {"", nil, "test.count", int64(1), countSuffix, []string{"tagA"}},
+		// {"", nil, "test.histogram", 2.3, histogramSuffix, []string{"tagA"}},
+		// {"", nil, "test.distribution", 2.3, distributionSuffix, []string{"tagA"}},
+		// {"", nil, "test.set", "uuid", setSuffix, []string{"tagA"}},
+		// {"flubber.", nil, "test.set", "uuid", setSuffix, []string{"tagA"}},
+		// {"", []string{"tagC"}, "test.set", "uuid", setSuffix, []string{"tagA"}},
+		// {"", nil, "test.count", int64(1), countSuffix, []string{"hello\nworld"}},
+	}
+
+	b.ReportAllocs()
+
+	for i, tt := range tests {
+		b.Run(strconv.Itoa(i), func(b *testing.B) {
+			c, err := New("127.0.0.1:56789")
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for n := 0; n < b.N; n++ {
+				c.send(tt.name, tt.value, tt.suffix, tt.tags, 1.0)
+			}
+		})
+	}
+}
+
+func BenchmarkFlushBatch(b *testing.B) {
+	var tests = []struct {
+		batchSize       int
+		globalNamespace string
+		globalTags      []string
+		name            string
+		value           interface{}
+		suffix          []byte
+		tags            []string
+	}{
+		// {"", nil, "test.gauge", 1.0, gaugeSuffix, nil},
+		// {"", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA"}},
+		{5, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{10, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{100, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{1000, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		// {"", nil, "test.count", int64(1), countSuffix, []string{"tagA"}},
+		// {"", nil, "test.histogram", 2.3, histogramSuffix, []string{"tagA"}},
+		// {"", nil, "test.distribution", 2.3, distributionSuffix, []string{"tagA"}},
+		// {"", nil, "test.set", "uuid", setSuffix, []string{"tagA"}},
+		// {"flubber.", nil, "test.set", "uuid", setSuffix, []string{"tagA"}},
+		// {"", []string{"tagC"}, "test.set", "uuid", setSuffix, []string{"tagA"}},
+		// {"", nil, "test.count", int64(1), countSuffix, []string{"hello\nworld"}},
+	}
+
+	b.ReportAllocs()
+
+	for i, tt := range tests {
+		b.Run(strconv.Itoa(i), func(b *testing.B) {
+			b.Run("join", func(b *testing.B) {
+				c, err := NewBuffered("127.0.0.1:56789", tt.batchSize)
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				b.ReportAllocs()
+				b.ResetTimer()
+
+				for n := 0; n < b.N; n++ {
+					c.send(tt.name, tt.value, tt.suffix, tt.tags, 1.0)
+				}
+			})
+			b.Run("writev", func(b *testing.B) {
+				c, err := NewBuffered("127.0.0.1:56789", tt.batchSize)
+				if err != nil {
+					b.Fatal(err)
+				}
+				c.writev = true
+
+				b.ReportAllocs()
+				b.ResetTimer()
+
+				for n := 0; n < b.N; n++ {
+					c.send(tt.name, tt.value, tt.suffix, tt.tags, 1.0)
+				}
+			})
+		})
+	}
+}

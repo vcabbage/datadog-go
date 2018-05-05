@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -95,54 +96,59 @@ type Client struct {
 	SkipErrors bool
 	// BufferLength is the length of the buffer in commands.
 	bufferLength int
-	flushTime    time.Duration
-	commands     [][]byte
-	buffer       bytes.Buffer
-	stop         chan struct{}
-	sync.Mutex
+
+	flushTime time.Duration
+	buffer    bytes.Buffer
+	writev    bool
+
+	doneOnce sync.Once
+	done     chan struct{}
+
+	mu       sync.Mutex
+	commands [][]byte
 }
 
 // New returns a pointer to a new Client given an addr in the format "hostname:port" or
 // "unix:///path/to/socket".
 func New(addr string) (*Client, error) {
-	if strings.HasPrefix(addr, UnixAddressPrefix) {
-		w, err := newUdsWriter(addr[len(UnixAddressPrefix)-1:])
-		if err != nil {
-			return nil, err
-		}
-		return NewWithWriter(w)
-	}
-	w, err := newUDPWriter(addr)
-	if err != nil {
-		return nil, err
-	}
-	return NewWithWriter(w)
+	w, err := newWriter(addr)
+	return &Client{writer: w}, err
 }
 
 // NewWithWriter creates a new Client with given writer. Writer is a
 // io.WriteCloser + SetWriteTimeout(time.Duration) error
-func NewWithWriter(w Writer) (*Client, error) {
-	client := &Client{writer: w, SkipErrors: false}
-	return client, nil
+func NewWithWriter(w Writer) *Client {
+	return &Client{writer: w}
 }
 
 // NewBuffered returns a Client that buffers its output and sends it in chunks.
 // Buflen is the length of the buffer in number of commands.
-func NewBuffered(addr string, buflen int) (*Client, error) {
-	client, err := New(addr)
+func NewBuffered(addr string, bufLen int) (*Client, error) {
+	w, err := newWriter(addr)
 	if err != nil {
 		return nil, err
 	}
-	client.bufferLength = buflen
-	client.commands = make([][]byte, 0, buflen)
-	client.flushTime = time.Millisecond * 100
-	client.stop = make(chan struct{}, 1)
-	go client.watch()
-	return client, nil
+
+	c := &Client{
+		writer:       w,
+		bufferLength: bufLen,
+		commands:     make([][]byte, 0, bufLen),
+		flushTime:    100 * time.Millisecond,
+		done:         make(chan struct{}),
+	}
+	go c.watch()
+
+	return c, nil
 }
 
-// format a message from its name, value, tags and rate.  Also adds global
-// namespace and tags.
+func newWriter(addr string) (Writer, error) {
+	if strings.HasPrefix(addr, UnixAddressPrefix) {
+		return newUdsWriter(addr[len(UnixAddressPrefix)-1:])
+	}
+	return newUDPWriter(addr)
+}
+
+// format a message from its name, value, tags and rate. Also adds global namespace and tags.
 func (c *Client) format(name string, value interface{}, suffix []byte, tags []string, rate float64) []byte {
 	// preallocated buffer, stack allocated as long as it doesn't escape
 	buf := make([]byte, 0, 200)
@@ -189,34 +195,33 @@ func (c *Client) SetWriteTimeout(d time.Duration) error {
 
 func (c *Client) watch() {
 	ticker := time.NewTicker(c.flushTime)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			c.Lock()
+			c.mu.Lock()
 			if len(c.commands) > 0 {
 				// FIXME: eating error here
 				c.flushLocked()
 			}
-			c.Unlock()
-		case <-c.stop:
-			ticker.Stop()
+			c.mu.Unlock()
+		case <-c.done:
 			return
 		}
 	}
 }
 
 func (c *Client) append(cmd []byte) error {
-	c.Lock()
-	defer c.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.commands = append(c.commands, cmd)
-	// if we should flush, lets do it
-	if len(c.commands) == c.bufferLength {
-		if err := c.flushLocked(); err != nil {
-			return err
-		}
+	if len(c.commands) < c.bufferLength {
+		return nil
 	}
-	return nil
+
+	return c.flushLocked()
 }
 
 func (c *Client) joinMaxSize(cmds [][]byte, sep string, maxSize int) ([][]byte, []int) {
@@ -271,16 +276,25 @@ func (c *Client) Flush() error {
 	if c == nil {
 		return nil
 	}
-	c.Lock()
-	defer c.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.flushLocked()
 }
 
-// flush the commands in the buffer.  Lock must be held by caller.
+// flush the commands in the buffer.
+//
+// c.mu must be held by caller.
 func (c *Client) flushLocked() error {
+	if c.writev {
+		bufs := net.Buffers(c.commands)
+		_, err := bufs.WriteTo(c.writer)
+		c.commands = c.commands[:0]
+		return err
+	}
+
 	frames, flushable := c.joinMaxSize(c.commands, "\n", OptimalPayloadSize)
-	var err error
 	cmdsFlushed := 0
+	var err error
 	for i, data := range frames {
 		_, e := c.writer.Write(data)
 		if e != nil {
@@ -419,10 +433,7 @@ func (c *Client) Close() error {
 	if c == nil {
 		return nil
 	}
-	select {
-	case c.stop <- struct{}{}:
-	default:
-	}
+	c.doneOnce.Do(func() { close(c.done) })
 
 	// if this client is buffered, flush before closing the writer
 	if c.bufferLength > 0 {

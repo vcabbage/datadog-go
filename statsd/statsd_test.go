@@ -86,10 +86,7 @@ func TestClientWithConn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	client, err := NewWithWriter(statsdWriterWrapper{conn})
-	if err != nil {
-		t.Fatal(err)
-	}
+	client := NewWithWriter(statsdWriterWrapper{conn})
 
 	clientTest(t, server, client)
 }
@@ -229,9 +226,9 @@ func TestBufferedClient(t *testing.T) {
 	}
 
 	client.Set("ss", "xx", nil, 1)
-	client.Lock()
+	client.mu.Lock()
 	err = client.flushLocked()
-	client.Unlock()
+	client.mu.Unlock()
 	if err != nil {
 		t.Errorf("Error sending: %s", err)
 	}
@@ -273,9 +270,9 @@ func TestBufferedClient(t *testing.T) {
 		t.Errorf("Expected to find %d commands, but found %d\n", 2, len(client.commands))
 	}
 
-	client.Lock()
+	client.mu.Lock()
 	err = client.flushLocked()
-	client.Unlock()
+	client.mu.Unlock()
 
 	if err != nil {
 		t.Errorf("Error sending: %s", err)
@@ -341,11 +338,11 @@ func TestBufferedClientBackground(t *testing.T) {
 	client.Set("ss", "xx", nil, 1)
 
 	time.Sleep(client.flushTime * 2)
-	client.Lock()
+	client.mu.Lock()
 	if len(client.commands) != 0 {
 		t.Errorf("Watch goroutine should have flushed commands, but found %d\n", len(client.commands))
 	}
-	client.Unlock()
+	client.mu.Unlock()
 }
 
 func TestBufferedClientFlush(t *testing.T) {
@@ -380,11 +377,11 @@ func TestBufferedClientFlush(t *testing.T) {
 
 	client.Flush()
 
-	client.Lock()
+	client.mu.Lock()
 	if len(client.commands) != 0 {
 		t.Errorf("Flush should have flushed commands, but found %d\n", len(client.commands))
 	}
-	client.Unlock()
+	client.mu.Unlock()
 }
 
 func stringsToBytes(ss []string) [][]byte {
@@ -585,9 +582,9 @@ func TestSendMsgUDP(t *testing.T) {
 		t.Errorf("Expected no error to be returned if message size is smaller or equal to MaxUDPPayloadSize, got: %s", err.Error())
 	}
 
-	client.Lock()
+	client.mu.Lock()
 	err = client.flushLocked()
-	client.Unlock()
+	client.mu.Unlock()
 
 	if err != nil {
 		t.Fatalf("Expected no error to be returned flushing the client, got: %s", err.Error())
@@ -863,7 +860,7 @@ func TestFlushOnClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	// stop the flushing mechanism so we can test the buffer without interferences
-	client.stop <- struct{}{}
+	client.doneOnce.Do(func() { close(client.done) })
 
 	message := "test message"
 
