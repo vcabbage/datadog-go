@@ -77,7 +77,7 @@ func BenchmarkClientFormat(b *testing.B) {
 		globalTags      []string
 		name            string
 		value           interface{}
-		suffix          []byte
+		suffix          string
 		tags            []string
 	}{
 		{"", nil, "test.gauge", 1.0, gaugeSuffix, nil},
@@ -105,7 +105,7 @@ func BenchmarkClientFormat(b *testing.B) {
 			b.ResetTimer()
 
 			for n := 0; n < b.N; n++ {
-				c.format(tt.name, tt.value, tt.suffix, tt.tags, 1.0)
+				c.appendStat(tt.name, tt.value, tt.suffix, 1.0, tt.tags...)
 			}
 		})
 	}
@@ -117,19 +117,10 @@ func BenchmarkFlush(b *testing.B) {
 		globalTags      []string
 		name            string
 		value           interface{}
-		suffix          []byte
+		suffix          string
 		tags            []string
 	}{
-		// {"", nil, "test.gauge", 1.0, gaugeSuffix, nil},
-		// {"", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA"}},
 		{"", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
-		// {"", nil, "test.count", int64(1), countSuffix, []string{"tagA"}},
-		// {"", nil, "test.histogram", 2.3, histogramSuffix, []string{"tagA"}},
-		// {"", nil, "test.distribution", 2.3, distributionSuffix, []string{"tagA"}},
-		// {"", nil, "test.set", "uuid", setSuffix, []string{"tagA"}},
-		// {"flubber.", nil, "test.set", "uuid", setSuffix, []string{"tagA"}},
-		// {"", []string{"tagC"}, "test.set", "uuid", setSuffix, []string{"tagA"}},
-		// {"", nil, "test.count", int64(1), countSuffix, []string{"hello\nworld"}},
 	}
 
 	b.ReportAllocs()
@@ -146,7 +137,7 @@ func BenchmarkFlush(b *testing.B) {
 
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					c.send(tt.name, tt.value, tt.suffix, tt.tags, 1.0)
+					c.send(tt.name, tt.value, tt.suffix, 1.0, tt.tags...)
 				}
 			})
 		})
@@ -160,29 +151,20 @@ func BenchmarkFlushBatch(b *testing.B) {
 		globalTags      []string
 		name            string
 		value           interface{}
-		suffix          []byte
+		suffix          string
 		tags            []string
 	}{
-		// {"", nil, "test.gauge", 1.0, gaugeSuffix, nil},
-		// {"", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA"}},
 		{1, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
 		{5, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
 		{10, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
 		{100, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
 		{1000, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
-		// {"", nil, "test.count", int64(1), countSuffix, []string{"tagA"}},
-		// {"", nil, "test.histogram", 2.3, histogramSuffix, []string{"tagA"}},
-		// {"", nil, "test.distribution", 2.3, distributionSuffix, []string{"tagA"}},
-		// {"", nil, "test.set", "uuid", setSuffix, []string{"tagA"}},
-		// {"flubber.", nil, "test.set", "uuid", setSuffix, []string{"tagA"}},
-		// {"", []string{"tagC"}, "test.set", "uuid", setSuffix, []string{"tagA"}},
-		// {"", nil, "test.count", int64(1), countSuffix, []string{"hello\nworld"}},
 	}
 
 	b.ReportAllocs()
 
-	for i, tt := range tests {
-		b.Run(fmt.Sprintf("%d-%d", i, tt.batchSize), func(b *testing.B) {
+	for _, tt := range tests {
+		b.Run(strconv.Itoa(tt.batchSize), func(b *testing.B) {
 			c, err := NewBuffered("127.0.0.1:56789", tt.batchSize)
 			if err != nil {
 				b.Fatal(err)
@@ -193,9 +175,54 @@ func BenchmarkFlushBatch(b *testing.B) {
 
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					c.send(tt.name, tt.value, tt.suffix, tt.tags, 1.0)
+					c.send(tt.name, tt.value, tt.suffix, 1.0, tt.tags...)
 				}
 			})
+		})
+	}
+}
+
+func BenchmarkFlushBatchShard(b *testing.B) {
+	var tests = []struct {
+		batchSize       int
+		globalNamespace string
+		globalTags      []string
+		name            string
+		value           interface{}
+		suffix          string
+		tags            []string
+	}{
+		{1, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{5, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{10, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{100, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{1000, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+	}
+
+	b.ReportAllocs()
+
+	for _, tt := range tests {
+		b.Run(strconv.Itoa(tt.batchSize), func(b *testing.B) {
+			c, err := NewBuffered("127.0.0.1:56789", tt.batchSize)
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			b.RunParallel(func(pb *testing.PB) {
+				c, err := c.Clone()
+				if err != nil {
+					b.Fatal(err)
+				}
+				for pb.Next() {
+					c.send(tt.name, tt.value, tt.suffix, 1.0, tt.tags...)
+				}
+			})
+
+			b.StopTimer()
+			c.Close()
 		})
 	}
 }
