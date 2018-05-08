@@ -97,6 +97,7 @@ type Client struct {
 	mu       sync.Mutex
 	buffer   []byte
 	commands int
+	timer    *time.Timer
 }
 
 func (c *Client) Clone() (*Client, error) {
@@ -112,9 +113,6 @@ func (c *Client) Clone() (*Client, error) {
 		bufferLength: c.bufferLength,
 		flushTime:    c.flushTime,
 		done:         make(chan struct{}),
-	}
-	if s.flushTime > 0 {
-		go s.watch()
 	}
 
 	return s, nil
@@ -152,7 +150,6 @@ func NewBuffered(addr string, bufLen int) (*Client, error) {
 		flushTime:    100 * time.Millisecond,
 		done:         make(chan struct{}),
 	}
-	go c.watch()
 
 	return c, nil
 }
@@ -235,23 +232,6 @@ func (c *Client) SetWriteTimeout(d time.Duration) error {
 	return c.writer.SetWriteTimeout(d)
 }
 
-func (c *Client) watch() {
-	ticker := time.NewTicker(c.flushTime)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			c.mu.Lock()
-			// FIXME: eating error here
-			c.flushLocked(true)
-			c.mu.Unlock()
-		case <-c.done:
-			return
-		}
-	}
-}
-
 // Flush forces a flush of the pending commands in the buffer
 func (c *Client) Flush() error {
 	if c == nil {
@@ -266,13 +246,21 @@ func (c *Client) Flush() error {
 //
 // c.mu must be held by caller.
 func (c *Client) flushLocked(force bool) error {
-	if !force && (c.commands == 0 || c.commands < c.bufferLength) {
+	if c.commands == 0 || !force && c.commands < c.bufferLength {
 		return nil
+	}
+
+	if c.timer != nil {
+		c.timer.Stop()
 	}
 
 	_, err := c.writer.Write(c.buffer)
 	c.buffer = c.buffer[:0]
 	c.commands = 0
+
+	if c.bufferLength > 1 {
+		c.timer = time.AfterFunc(c.flushTime, func() { c.Flush() })
+	}
 
 	if c.SkipErrors {
 		return nil
