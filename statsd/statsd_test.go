@@ -77,7 +77,7 @@ func TestClientUDP(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := New(addr)
+	client, err := New(ConnAddr(addr))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,13 +93,20 @@ func (statsdWriterWrapper) SetWriteTimeout(time.Duration) error {
 	return nil
 }
 
+func (statsdWriterWrapper) MTU() int {
+	return OptimalPayloadSize
+}
+
 func TestClientWithConn(t *testing.T) {
 	server, conn, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	client := NewWithWriter(statsdWriterWrapper{conn})
+	client, err := New(ConnWriter(statsdWriterWrapper{conn}))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	clientTest(t, server, client)
 }
@@ -146,7 +153,7 @@ func TestClientUDS(t *testing.T) {
 	defer server.Close()
 
 	addrParts := []string{UnixAddressPrefix, addr}
-	client, err := New(strings.Join(addrParts, ""))
+	client, err := New(ConnAddr(strings.Join(addrParts, "")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +188,7 @@ func TestClientUDSClose(t *testing.T) {
 	addr := filepath.Join(dir, "dsd.socket")
 
 	addrParts := []string{UnixAddressPrefix, addr}
-	client, err := New(strings.Join(addrParts, ""))
+	client, err := New(ConnAddr(strings.Join(addrParts, "")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +210,7 @@ func TestBufferedClient(t *testing.T) {
 	defer server.Close()
 
 	bufferLength := 9
-	client, err := NewBuffered(addr, bufferLength)
+	client, err := New(ConnAddr(addr), ConnBuffer(bufferLength))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +327,7 @@ func TestBufferedClientBackground(t *testing.T) {
 	defer server.Close()
 
 	bufferLength := 5
-	client, err := NewBuffered(addr, bufferLength)
+	client, err := New(ConnAddr(addr), ConnBuffer(bufferLength))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +365,7 @@ func TestBufferedClientFlush(t *testing.T) {
 	defer server.Close()
 
 	bufferLength := 5
-	client, err := NewBuffered(addr, bufferLength)
+	client, err := New(ConnAddr(addr), ConnBuffer(bufferLength))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +403,7 @@ func TestSendMsgUDP(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := New(addr)
+	client, err := New(ConnAddr(addr))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +435,7 @@ func TestSendMsgUDP(t *testing.T) {
 		t.Fatalf("The received message did not match what we expect.")
 	}
 
-	client, err = NewBuffered(addr, 1)
+	client, err = New(ConnAddr(addr), ConnBuffer(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +490,7 @@ func TestSendUDSErrors(t *testing.T) {
 	}
 
 	addrParts := []string{UnixAddressPrefix, addr}
-	client, err := New(strings.Join(addrParts, ""))
+	client, err := New(ConnAddr(strings.Join(addrParts, "")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +550,7 @@ func TestSendUDSErrors(t *testing.T) {
 }
 
 func TestSendUDSIgnoreErrors(t *testing.T) {
-	client, err := New("unix:///invalid")
+	client, err := New(ConnAddr("unix:///invalid"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -716,7 +723,7 @@ func TestServiceChecks(t *testing.T) {
 }
 
 func TestFlushOnClose(t *testing.T) {
-	client, err := NewBuffered("localhost:1201", 64)
+	client, err := New(ConnAddr("localhost:1201"), ConnBuffer(64))
 	if err != nil {
 		t.Fatal(err)
 	}

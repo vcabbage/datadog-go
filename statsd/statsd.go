@@ -52,6 +52,9 @@ const MaxUDPPayloadSize = 65467
 // traffic instead of UDP.
 const UnixAddressPrefix = "unix://"
 
+// DefaultAddr is used if no writer or address is provided.
+const DefaultAddr = "127.0.0.1:8125"
+
 // Stat suffixes
 const (
 	gaugeSuffix        = "|g"
@@ -69,13 +72,14 @@ const (
 type Writer interface {
 	Write(data []byte) (n int, err error)
 	SetWriteTimeout(time.Duration) error
+	MTU() int
 	Close() error
 }
 
 // A Client is a handle for sending messages to dogstatsd.  It is safe to
 // use one Client from multiple goroutines simultaneously.
 type Client struct {
-	addr string
+	opts []ConnOpt
 
 	// Writer handles the underlying networking protocol
 	writer Writer
@@ -86,8 +90,8 @@ type Client struct {
 	// skipErrors turns off error passing and allows UDS to emulate UDP behaviour
 	SkipErrors bool
 
-	// BufferLength is the length of the buffer in commands.
-	bufferLength int
+	maxCommands int
+	mtu         int
 
 	flushTime time.Duration
 
@@ -100,58 +104,60 @@ type Client struct {
 	timer    *time.Timer
 }
 
-func (c *Client) Clone() (*Client, error) {
-	wr, err := newWriter(c.addr)
-	if err != nil {
-		return nil, err
-	}
-	s := &Client{
-		writer:       wr,
-		Namespace:    c.Namespace,
-		Tags:         c.Tags,
-		SkipErrors:   c.SkipErrors,
-		bufferLength: c.bufferLength,
-		flushTime:    c.flushTime,
-		done:         make(chan struct{}),
-	}
-
-	return s, nil
-}
-
-// New returns a pointer to a new Client given an addr in the format "hostname:port" or
-// "unix:///path/to/socket".
-func New(addr string) (*Client, error) {
-	w, err := newWriter(addr)
-	return &Client{addr: addr, writer: w}, err
-}
-
-// NewWithWriter creates a new Client with given writer. Writer is a
-// io.WriteCloser + SetWriteTimeout(time.Duration) error
-func NewWithWriter(w Writer) *Client {
-	return &Client{writer: w}
-}
-
-// NewBuffered returns a Client that buffers its output and sends it in chunks.
+// New returns a *Client given an addr in the format "hostname:port"
+// or "unix:///path/to/socket".
+//
 // Buflen is the length of the buffer in number of commands.
-func NewBuffered(addr string, bufLen int) (*Client, error) {
-	if bufLen == 1 {
-		return New(addr)
-	}
-
-	w, err := newWriter(addr)
-	if err != nil {
-		return nil, err
-	}
-
+func New(opts ...ConnOpt) (*Client, error) {
 	c := &Client{
-		addr:         addr,
-		writer:       w,
-		bufferLength: bufLen,
-		flushTime:    100 * time.Millisecond,
-		done:         make(chan struct{}),
+		opts:        opts,
+		maxCommands: 1,
+		flushTime:   100 * time.Millisecond,
+		done:        make(chan struct{}),
+	}
+
+	for _, opt := range opts {
+		err := opt(c)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if c.writer == nil {
+		err := ConnAddr(DefaultAddr)(c)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return c, nil
+}
+
+type ConnOpt func(*Client) error
+
+func ConnAddr(addr string) ConnOpt {
+	return func(c *Client) error {
+		w, err := newWriter(addr)
+		if err != nil {
+			return err
+		}
+		return ConnWriter(w)(c)
+	}
+}
+
+func ConnBuffer(size int) ConnOpt {
+	return func(c *Client) error {
+		c.maxCommands = size
+		return nil
+	}
+}
+
+func ConnWriter(w Writer) ConnOpt {
+	return func(c *Client) error {
+		c.writer = w
+		c.mtu = w.MTU()
+		return nil
+	}
 }
 
 func newWriter(addr string) (Writer, error) {
@@ -159,6 +165,23 @@ func newWriter(addr string) (Writer, error) {
 		return newUdsWriter(addr[len(UnixAddressPrefix)-1:])
 	}
 	return newUDPWriter(addr)
+}
+
+// Clone creates a new client with the same settings.
+//
+// This is useful to avoid lock contention between busy,
+// long-running goroutines.
+func (c *Client) Clone() (*Client, error) {
+	cc, err := New(c.opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	cc.Namespace = c.Namespace
+	cc.Tags = c.Tags
+	cc.SkipErrors = c.SkipErrors
+
+	return c, nil
 }
 
 // format a message from its name, value, tags and rate. Also adds global namespace and tags.
@@ -246,7 +269,7 @@ func (c *Client) Flush() error {
 //
 // c.mu must be held by caller.
 func (c *Client) flushLocked(force bool) error {
-	if c.commands == 0 || !force && c.commands < c.bufferLength {
+	if c.commands == 0 || !force && c.commands < c.maxCommands {
 		return nil
 	}
 
@@ -258,7 +281,7 @@ func (c *Client) flushLocked(force bool) error {
 	c.buffer = c.buffer[:0]
 	c.commands = 0
 
-	if c.bufferLength > 1 {
+	if c.maxCommands > 1 {
 		c.timer = time.AfterFunc(c.flushTime, func() { c.Flush() })
 	}
 
@@ -371,7 +394,7 @@ func (c *Client) Close() error {
 	}
 
 	// if this client is buffered, flush before closing the writer
-	if c.bufferLength > 0 {
+	if c.maxCommands > 0 {
 		if err := c.Flush(); err != nil {
 			return err
 		}

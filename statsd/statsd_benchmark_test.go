@@ -127,7 +127,7 @@ func BenchmarkFlush(b *testing.B) {
 
 	for i, tt := range tests {
 		b.Run(strconv.Itoa(i), func(b *testing.B) {
-			c, err := New("127.0.0.1:56789")
+			c, err := New(ConnAddr("127.0.0.1:56789"))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -165,7 +165,7 @@ func BenchmarkFlushBatch(b *testing.B) {
 
 	for _, tt := range tests {
 		b.Run(strconv.Itoa(tt.batchSize), func(b *testing.B) {
-			c, err := NewBuffered("127.0.0.1:56789", tt.batchSize)
+			c, err := New(ConnAddr("127.0.0.1:56789"), ConnBuffer(tt.batchSize))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -203,7 +203,7 @@ func BenchmarkFlushBatchShard(b *testing.B) {
 
 	for _, tt := range tests {
 		b.Run(strconv.Itoa(tt.batchSize), func(b *testing.B) {
-			c, err := NewBuffered("127.0.0.1:56789", tt.batchSize)
+			c, err := New(ConnAddr("127.0.0.1:56789"), ConnBuffer(tt.batchSize))
 			if err != nil {
 				b.Fatal(err)
 			}

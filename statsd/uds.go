@@ -65,3 +65,7 @@ func (w *udsWriter) Close() error {
 	}
 	return nil
 }
+
+func (*udsWriter) MTU() int {
+	return MaxUDPPayloadSize
+}
