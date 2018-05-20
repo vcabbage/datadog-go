@@ -1,3 +1,12 @@
+# **github.com/vcabbage/dogstatsd**
+
+[![Go Report Card](https://goreportcard.com/badge/github.com/vcabbage/dogstatsd)](https://goreportcard.com/report/github.com/vcabbage/dogstatsd)
+[![Coverage Status](https://coveralls.io/repos/github/vcabbage/dogstatsd/badge.svg?branch=master)](https://coveralls.io/github/vcabbage/dogstatsd?branch=master)
+[![Build Status](https://travis-ci.org/vcabbage/dogstatsd.svg?branch=master)](https://travis-ci.org/vcabbage/dogstatsd)
+[![Build status](https://ci.appveyor.com/api/projects/status/cnhun09mqaofhffp?svg=true)](https://ci.appveyor.com/project/vCabbage/dogstatsd)
+[![GoDoc](https://godoc.org/github.com/vcabbage/dogstatsd?status.svg)](http://godoc.org/github.com/vcabbage/dogstatsd)
+[![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/vcabbage/dogstatsd/master/LICENSE.txt)
+
 ## Fork Info
 
 This code was forked from [datadog-go](https://github.com/DataDog/datadog-go) with the purpose of improving performance and adjusting the API.
