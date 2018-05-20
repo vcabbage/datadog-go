@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -128,6 +129,8 @@ func clientTest(t *testing.T, server io.Reader, client *Client) {
 }
 
 func TestClientUDS(t *testing.T) {
+	testSkipWindows(t)
+
 	dir, err := ioutil.TempDir("", "socket")
 	if err != nil {
 		t.Fatal(err)
@@ -173,6 +176,8 @@ func TestClientUDS(t *testing.T) {
 }
 
 func TestClientUDSClose(t *testing.T) {
+	testSkipWindows(t)
+
 	dir, err := ioutil.TempDir("", "socket")
 	if err != nil {
 		t.Fatal(err)
@@ -485,6 +490,8 @@ func TestSendMsgUDP(t *testing.T) {
 }
 
 func TestSendUDSErrors(t *testing.T) {
+	testSkipWindows(t)
+
 	dir, err := ioutil.TempDir("", "socket")
 	if err != nil {
 		t.Fatal(err)
@@ -559,6 +566,8 @@ func TestSendUDSErrors(t *testing.T) {
 }
 
 func TestSendUDSIgnoreErrors(t *testing.T) {
+	testSkipWindows(t)
+
 	client, err := New(ConnAddr("unix:///invalid"))
 	if err != nil {
 		t.Fatal(err)
@@ -757,5 +766,11 @@ func TestFlushOnClose(t *testing.T) {
 
 	if len(client.buffer) != 0 {
 		t.Errorf("Client buffer should be empty, got %d", len(client.buffer))
+	}
+}
+
+func testSkipWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping UDS tests on Windows")
 	}
 }
