@@ -6,7 +6,7 @@ adding tags and histograms and pushing upstream to Datadog.
 
 Refer to http://docs.datadoghq.com/guides/dogstatsd/ for information about DogStatsD.
 */
-package statsd
+package dogstatsd
 
 import (
 	"errors"

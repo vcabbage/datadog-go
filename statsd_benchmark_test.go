@@ -1,6 +1,6 @@
 // +build go1.7
 
-package statsd
+package dogstatsd
 
 import (
 	"math"
