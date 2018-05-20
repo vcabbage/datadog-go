@@ -189,7 +189,7 @@ func (c *Client) appendStat(name string, value interface{}, suffix string, rate 
 
 	switch val := value.(type) {
 	case float64:
-		buf = strconv.AppendFloat(buf, val, 'f', 6, 64)
+		buf = strconv.AppendFloat(buf, val, 'f', -1, 64)
 
 	case int64:
 		buf = strconv.AppendInt(buf, val, 10)
@@ -337,7 +337,7 @@ func (c *Client) Set(name string, value string, rate float64, tags ...string) er
 
 // Timing sends timing information, it is an alias for TimeInMilliseconds
 func (c *Client) Timing(name string, value time.Duration, rate float64, tags ...string) error {
-	return c.TimeInMilliseconds(name, float64(value/time.Millisecond), rate, tags...)
+	return c.TimeInMilliseconds(name, float64(value)/float64(time.Millisecond), rate, tags...)
 }
 
 // TimeInMilliseconds sends timing information in milliseconds.

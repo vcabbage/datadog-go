@@ -24,15 +24,15 @@ var dogstatsdTests = []struct {
 	Rate            float64
 	Expected        string
 }{
-	{"", nil, gauge, "test.gauge", 1.0, nil, 1.0, "test.gauge:1.000000|g"},
-	{"", nil, gauge, "test.gauge", 1.0, nil, 0.999999, "test.gauge:1.000000|g|@0.999999"},
-	{"", nil, gauge, "test.gauge", 1.0, []string{"tagA"}, 1.0, "test.gauge:1.000000|g|#tagA"},
-	{"", nil, gauge, "test.gauge", 1.0, []string{"tagA", "tagB"}, 1.0, "test.gauge:1.000000|g|#tagA,tagB"},
-	{"", nil, gauge, "test.gauge", 1.0, []string{"tagA"}, 0.999999, "test.gauge:1.000000|g|@0.999999|#tagA"},
+	{"", nil, gauge, "test.gauge", 1.0, nil, 1.0, "test.gauge:1|g"},
+	{"", nil, gauge, "test.gauge", 1.0, nil, 0.999999, "test.gauge:1|g|@0.999999"},
+	{"", nil, gauge, "test.gauge", 1.0, []string{"tagA"}, 1.0, "test.gauge:1|g|#tagA"},
+	{"", nil, gauge, "test.gauge", 1.0, []string{"tagA", "tagB"}, 1.0, "test.gauge:1|g|#tagA,tagB"},
+	{"", nil, gauge, "test.gauge", 1.0, []string{"tagA"}, 0.999999, "test.gauge:1|g|@0.999999|#tagA"},
 	{"", nil, count, "test.count", int64(1), []string{"tagA"}, 1.0, "test.count:1|c|#tagA"},
 	{"", nil, count, "test.count", int64(-1), []string{"tagA"}, 1.0, "test.count:-1|c|#tagA"},
-	{"", nil, histogram, "test.histogram", 2.3, []string{"tagA"}, 1.0, "test.histogram:2.300000|h|#tagA"},
-	{"", nil, distribution, "test.distribution", 2.3, []string{"tagA"}, 1.0, "test.distribution:2.300000|d|#tagA"},
+	{"", nil, histogram, "test.histogram", 2.3, []string{"tagA"}, 1.0, "test.histogram:2.3|h|#tagA"},
+	{"", nil, distribution, "test.distribution", 2.3, []string{"tagA"}, 1.0, "test.distribution:2.3|d|#tagA"},
 	{"", nil, set, "test.set", "uuid", []string{"tagA"}, 1.0, "test.set:uuid|s|#tagA"},
 	{"flubber.", nil, set, "test.set", "uuid", []string{"tagA"}, 1.0, "flubber.test.set:uuid|s|#tagA"},
 	{"", []string{"tagC"}, set, "test.set", "uuid", []string{"tagA"}, 1.0, "test.set:uuid|s|#tagC,tagA"},
@@ -230,10 +230,10 @@ func TestBufferedClient(t *testing.T) {
 	size += len("foo.ic:1|c|#dd:2")
 	size += len("\nfoo.dc:-1|c|#dd:2")
 	size += len("\nfoo.cc:1|c|#dd:2")
-	size += len("\nfoo.gg:10.000000|g|#dd:2")
-	size += len("\nfoo.hh:1.000000|h|#dd:2")
-	size += len("\nfoo.dd:1.000000|d|#dd:2")
-	size += len("\nfoo.tt:0.123000|ms|#dd:2")
+	size += len("\nfoo.gg:10|g|#dd:2")
+	size += len("\nfoo.hh:1|h|#dd:2")
+	size += len("\nfoo.dd:1|d|#dd:2")
+	size += len("\nfoo.tt:0.123|ms|#dd:2")
 	size += len("\nfoo.ss:ss|s|#dd:2")
 
 	if len(client.buffer) != size {
@@ -264,10 +264,10 @@ func TestBufferedClient(t *testing.T) {
 		`foo.ic:1|c|#dd:2`,
 		`foo.dc:-1|c|#dd:2`,
 		`foo.cc:1|c|#dd:2`,
-		`foo.gg:10.000000|g|#dd:2`,
-		`foo.hh:1.000000|h|#dd:2`,
-		`foo.dd:1.000000|d|#dd:2`,
-		`foo.tt:0.123000|ms|#dd:2`,
+		`foo.gg:10|g|#dd:2`,
+		`foo.hh:1|h|#dd:2`,
+		`foo.dd:1|d|#dd:2`,
+		`foo.tt:0.123|ms|#dd:2`,
 		`foo.ss:ss|s|#dd:2`,
 		`foo.ss:xx|s|#dd:2`,
 	}
