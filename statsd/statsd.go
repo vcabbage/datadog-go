@@ -227,8 +227,8 @@ func (c *Client) append(buf []byte) error {
 	}
 
 	c.mu.Lock()
-	// check if MaxUDPPayloadSize reached
-	if len(c.buffer)+len(buf)+1 > MaxUDPPayloadSize {
+	// check if mtu reached
+	if len(c.buffer)+1+len(buf) > c.mtu {
 		err := c.flushLocked(true)
 		if err != nil {
 			return err
