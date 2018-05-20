@@ -1,6 +1,12 @@
+## Fork Info
+
+This code was forked from [datadog-go](https://github.com/DataDog/datadog-go) with the purpose of improving performance and adjusting the API.
+
+
+
 ## Overview
 
-Package `dogstatsd` provides a Go [dogstatsd](http://docs.datadoghq.com/guides/dogstatsd/) client. Dogstatsd extends Statsd, adding tags
+Package `dogstatsd` provides a Go [dogstatsd](https://docs.datadoghq.com/guides/dogstatsd/) client. Dogstatsd extends Statsd, adding tags
 and histograms.
 
 ## Get the code
@@ -31,7 +37,8 @@ err = c.Count("request.count_total", 2, 1)
 
 ## Buffering Client
 
-DogStatsD accepts packets with multiple statsd payloads in them. Using the `ConnBuffer` option will buffer up commands and send them when the buffer is reached or after 100msec.
+DogStatsD accepts packets with multiple statsd payloads in them. Using the `ConnBuffer` option will buffer up commands
+and send them when the buffer is reached or after 100msec.
 
 ## Unix Domain Sockets Client
 

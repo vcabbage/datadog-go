@@ -19,27 +19,12 @@ import (
 )
 
 const (
-	// OptimalPayloadSize defines the optimal payload size for a UDP datagram, 1432 bytes
-	// is optimal for regular networks with an MTU of 1500 so datagrams don't get
-	// fragmented. It's generally recommended not to fragment UDP datagrams as losing
-	// a single fragment will cause the entire datagram to be lost.
-	//
-	// This can be increased if your network has a greater MTU or you don't mind UDP
-	// datagrams getting fragmented. The practical limit is MaxUDPPayloadSize
-	OptimalPayloadSize = 1432
-
-	// MaxUDPPayloadSize defines the maximum payload size for a UDP datagram.
-	// Its value comes from the calculation: 65535 bytes Max UDP datagram size -
-	// 8byte UDP header - 60byte max IP headers
-	// any number greater than that will see frames being cut out.
-	MaxUDPPayloadSize = 65467
-
-	// UnixAddressPrefix holds the prefix to use to enable Unix Domain Socket
-	// traffic instead of UDP.
-	UnixAddressPrefix = "unix://"
-
 	// DefaultAddr is used if no writer or address is provided.
 	DefaultAddr = "127.0.0.1:8125"
+
+	// DefaultFlushTimeout is default duration between flushing the buffer to
+	// the server when buffering is enabled.
+	DefaultFlushTimeout = 100 * time.Millisecond
 )
 
 // Stat suffixes
@@ -96,7 +81,7 @@ type Client struct {
 func New(opts ...ConnOpt) (*Client, error) {
 	c := &Client{
 		opts:      opts,
-		flushTime: 100 * time.Millisecond,
+		flushTime: DefaultFlushTimeout,
 		done:      make(chan struct{}),
 	}
 
@@ -134,8 +119,13 @@ func ConnAddr(addr string) ConnOpt {
 // ConnBuffer sets the maximum buffer size before sending to
 // the server.
 //
-// You may need to adjust the dogstatsd_buffer_size options
-// in your DataDog server config.yaml.
+// The dogstatsd_buffer_size option in the DataDog agent's
+// config.yaml must be equal to or larger than the buffer size
+// set here to prevent dropped/corrupted metrics.
+//
+// The buffer size is additionally limited by the interface's MTU.
+// Setting the buffer size larger than the MTU will result in a
+// maximum buffer size equal to the MTU.
 func ConnBuffer(size int) ConnOpt {
 	return func(c *Client) error {
 		c.maxBuffer = size
@@ -153,8 +143,9 @@ func ConnWriter(w Writer) ConnOpt {
 }
 
 func newWriter(addr string) (Writer, error) {
-	if strings.HasPrefix(addr, UnixAddressPrefix) {
-		return newUdsWriter(addr[len(UnixAddressPrefix)-1:])
+	const unixPrefix = "unix://"
+	if strings.HasPrefix(addr, unixPrefix) {
+		return newUdsWriter(addr[len(unixPrefix)-1:])
 	}
 	return newUDPWriter(addr)
 }
@@ -213,9 +204,9 @@ func (c *Client) appendStat(name string, value interface{}, suffix string, rate 
 }
 
 func (c *Client) append(buf []byte) error {
-	// return an error if message is bigger than MaxUDPPayloadSize
-	if len(buf) > MaxUDPPayloadSize {
-		return errors.New("message size exceeds MaxUDPPayloadSize")
+	// return an error if message is larger than mtu
+	if len(buf) > c.mtu {
+		return errors.New("message size exceeds MTU")
 	}
 
 	c.mu.Lock()
@@ -225,6 +216,7 @@ func (c *Client) append(buf []byte) error {
 	if newSize > c.mtu || (c.maxBuffer > 0 && newSize > c.maxBuffer) {
 		err := c.flushLocked()
 		if err != nil {
+			c.mu.Unlock()
 			return err
 		}
 	}

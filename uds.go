@@ -67,5 +67,5 @@ func (w *udsWriter) Close() error {
 }
 
 func (*udsWriter) MTU() int {
-	return MaxUDPPayloadSize
+	return 65535
 }

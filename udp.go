@@ -40,6 +40,13 @@ func (w udpWriter) MTU() int {
 }
 
 func mtuByLocalAddr(local net.IP) int {
+	overhead := udpOverhead
+	if local.To4() == nil {
+		overhead += ipv6Overhead
+	} else {
+		overhead += +ipv4Overhead
+	}
+
 	ifaces, _ := net.Interfaces()
 
 	for _, iface := range ifaces {
@@ -47,10 +54,17 @@ func mtuByLocalAddr(local net.IP) int {
 		for _, addr := range addrs {
 			addr, ok := addr.(*net.IPNet)
 			if ok && addr.Contains(local) {
-				return iface.MTU - 28
+				return iface.MTU - overhead
 			}
 		}
 	}
 
-	return OptimalPayloadSize
+	return typicalMTU - overhead
 }
+
+const (
+	typicalMTU   = 1500
+	ipv4Overhead = 20
+	ipv6Overhead = 40
+	udpOverhead  = 8
+)

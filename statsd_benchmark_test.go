@@ -3,73 +3,11 @@
 package statsd
 
 import (
-	"fmt"
+	"math"
 	"strconv"
 	"testing"
+	"time"
 )
-
-var statBytes []byte
-var stat string
-
-// Results:
-// BenchmarkStatBuildGauge_Sprintf-8       	     500	  45699958 ns/op
-// BenchmarkStatBuildGauge_Concat-8        	    1000	  23452863 ns/op
-// BenchmarkStatBuildGauge_BytesAppend-8   	    1000	  21705121 ns/op
-func BenchmarkStatBuildGauge_Sprintf(b *testing.B) {
-	for n := 0; n < b.N; n++ {
-		for x := 0; x < 100000; x++ {
-			stat = fmt.Sprintf("%f|g", 3.14159)
-		}
-	}
-}
-
-func BenchmarkStatBuildGauge_Concat(b *testing.B) {
-	for n := 0; n < b.N; n++ {
-		for x := 0; x < 100000; x++ {
-			stat = strconv.FormatFloat(3.14159, 'f', -1, 64) + "|g"
-		}
-	}
-}
-
-func BenchmarkStatBuildGauge_BytesAppend(b *testing.B) {
-	suffix := []byte("|g")
-
-	for n := 0; n < b.N; n++ {
-		for x := 0; x < 100000; x++ {
-			statBytes = []byte{}
-			statBytes = append(strconv.AppendFloat(statBytes, 3.14159, 'f', -1, 64), suffix...)
-		}
-	}
-}
-
-func BenchmarkStatBuildCount_Sprintf(b *testing.B) {
-	for n := 0; n < b.N; n++ {
-		for x := 0; x < 100000; x++ {
-			stat = fmt.Sprintf("%d|c", 314)
-		}
-	}
-}
-
-func BenchmarkStatBuildCount_Concat(b *testing.B) {
-	for n := 0; n < b.N; n++ {
-		for x := 0; x < 100000; x++ {
-			stat = strconv.FormatInt(314, 10) + "|c"
-		}
-	}
-}
-
-func BenchmarkStatBuildCount_BytesAppend(b *testing.B) {
-	suffix := []byte("|c")
-
-	for n := 0; n < b.N; n++ {
-		for x := 0; x < 100000; x++ {
-			statBytes = []byte{}
-			statBytes = append(strconv.AppendInt(statBytes, 314, 10), suffix...)
-		}
-	}
-}
-
-var FormatSink []byte
 
 func BenchmarkClientFormat(b *testing.B) {
 	var tests = []struct {
@@ -96,10 +34,9 @@ func BenchmarkClientFormat(b *testing.B) {
 
 	for i, tt := range tests {
 		b.Run(strconv.Itoa(i), func(b *testing.B) {
-			c := &Client{
-				Namespace: tt.globalNamespace,
-				Tags:      tt.globalTags,
-			}
+			c, _ := New(ConnWriter(nullWriter{}))
+			c.Namespace = tt.globalNamespace
+			c.Tags = tt.globalTags
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -110,6 +47,13 @@ func BenchmarkClientFormat(b *testing.B) {
 		})
 	}
 }
+
+type nullWriter struct{}
+
+func (nullWriter) Write(b []byte) (int, error)         { return len(b), nil }
+func (nullWriter) SetWriteTimeout(time.Duration) error { return nil }
+func (nullWriter) MTU() int                            { return math.MaxInt32 }
+func (nullWriter) Close() error                        { return nil }
 
 func BenchmarkFlush(b *testing.B) {
 	var tests = []struct {
@@ -145,6 +89,8 @@ func BenchmarkFlush(b *testing.B) {
 }
 
 func BenchmarkFlushBatch(b *testing.B) {
+	const kb = 1024
+
 	var tests = []struct {
 		batchSize       int
 		globalNamespace string
@@ -154,11 +100,12 @@ func BenchmarkFlushBatch(b *testing.B) {
 		suffix          string
 		tags            []string
 	}{
-		{1, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
-		{5, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
-		{10, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
-		{100, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
-		{1000, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{1 * kb, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{4 * kb, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{8 * kb, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{16 * kb, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{32 * kb, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{64 * kb, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
 	}
 
 	b.ReportAllocs()
@@ -183,6 +130,8 @@ func BenchmarkFlushBatch(b *testing.B) {
 }
 
 func BenchmarkFlushBatchShard(b *testing.B) {
+	const kb = 1024
+
 	var tests = []struct {
 		batchSize       int
 		globalNamespace string
@@ -192,11 +141,12 @@ func BenchmarkFlushBatchShard(b *testing.B) {
 		suffix          string
 		tags            []string
 	}{
-		{1, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
-		{5, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
-		{10, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
-		{100, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
-		{1000, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{1 * kb, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{4 * kb, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{8 * kb, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{16 * kb, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{32 * kb, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
+		{64 * kb, "", nil, "test.gauge", 1.0, gaugeSuffix, []string{"tagA", "tagB"}},
 	}
 
 	b.ReportAllocs()

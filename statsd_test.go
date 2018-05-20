@@ -85,17 +85,12 @@ func TestClientUDP(t *testing.T) {
 	clientTest(t, server, client)
 }
 
-type statsdWriterWrapper struct {
+type testWriter struct {
 	io.WriteCloser
 }
 
-func (statsdWriterWrapper) SetWriteTimeout(time.Duration) error {
-	return nil
-}
-
-func (statsdWriterWrapper) MTU() int {
-	return OptimalPayloadSize
-}
+func (testWriter) SetWriteTimeout(time.Duration) error { return nil }
+func (testWriter) MTU() int                            { return 65535 }
 
 func TestClientWithConn(t *testing.T) {
 	server, conn, err := os.Pipe()
@@ -103,7 +98,7 @@ func TestClientWithConn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	client, err := New(ConnWriter(statsdWriterWrapper{conn}))
+	client, err := New(ConnWriter(testWriter{conn}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,8 +147,7 @@ func TestClientUDS(t *testing.T) {
 	}
 	defer server.Close()
 
-	addrParts := []string{UnixAddressPrefix, addr}
-	client, err := New(ConnAddr(strings.Join(addrParts, "")))
+	client, err := New(ConnAddr("unix://" + addr))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,8 +181,7 @@ func TestClientUDSClose(t *testing.T) {
 
 	addr := filepath.Join(dir, "dsd.socket")
 
-	addrParts := []string{UnixAddressPrefix, addr}
-	client, err := New(ConnAddr(strings.Join(addrParts, "")))
+	client, err := New(ConnAddr("unix://" + addr))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +202,7 @@ func TestBufferedClient(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := New(ConnAddr(addr), ConnBuffer(MaxUDPPayloadSize))
+	client, err := New(ConnAddr(addr), ConnBuffer(typicalMTU))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,19 +418,19 @@ func TestSendMsgUDP(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = client.append(bytes.Repeat([]byte("x"), MaxUDPPayloadSize+1))
+	err = client.append(bytes.Repeat([]byte("x"), client.mtu+1))
 	if err == nil {
-		t.Error("Expected error to be returned if message size is bigger than MaxUDPPayloadSize")
+		t.Error("Expected error to be returned if message size is bigger than MTU")
 	}
 
 	message := "test message"
 
 	err = client.append([]byte(message))
 	if err != nil {
-		t.Errorf("Expected no error to be returned if message size is smaller or equal to MaxUDPPayloadSize, got: %s", err.Error())
+		t.Errorf("Expected no error to be returned if message size is smaller or equal to MTU, got: %s", err.Error())
 	}
 
-	buffer := make([]byte, MaxUDPPayloadSize+1)
+	buffer := make([]byte, client.mtu+1)
 	n, err := io.ReadAtLeast(server, buffer, 1)
 
 	if err != nil {
@@ -445,7 +438,7 @@ func TestSendMsgUDP(t *testing.T) {
 	}
 
 	if n != len(message) {
-		t.Fatalf("Failed to read full message from buffer. Got size `%d` expected `%d`", n, MaxUDPPayloadSize)
+		t.Fatalf("Failed to read full message from buffer. Got size `%d` expected `%d`", n, client.mtu)
 	}
 
 	if string(buffer[:n]) != message {
@@ -457,14 +450,14 @@ func TestSendMsgUDP(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = client.append(bytes.Repeat([]byte("x"), MaxUDPPayloadSize+1))
+	err = client.append(bytes.Repeat([]byte("x"), client.mtu+1))
 	if err == nil {
-		t.Error("Expected error to be returned if message size is bigger than MaxUDPPayloadSize")
+		t.Error("Expected error to be returned if message size is bigger than MTU")
 	}
 
 	err = client.append([]byte(message))
 	if err != nil {
-		t.Errorf("Expected no error to be returned if message size is smaller or equal to MaxUDPPayloadSize, got: %s", err.Error())
+		t.Errorf("Expected no error to be returned if message size is smaller or equal to MTU, got: %s", err.Error())
 	}
 
 	client.mu.Lock()
@@ -475,7 +468,7 @@ func TestSendMsgUDP(t *testing.T) {
 		t.Fatalf("Expected no error to be returned flushing the client, got: %s", err.Error())
 	}
 
-	buffer = make([]byte, MaxUDPPayloadSize+1)
+	buffer = make([]byte, client.mtu+1)
 	n, err = io.ReadAtLeast(server, buffer, 1)
 
 	if err != nil {
@@ -483,7 +476,7 @@ func TestSendMsgUDP(t *testing.T) {
 	}
 
 	if n != len(message) {
-		t.Fatalf("Failed to read full message from buffer. Got size `%d` expected `%d`", n, MaxUDPPayloadSize)
+		t.Fatalf("Failed to read full message from buffer. Got size `%d` expected `%d`", n, client.mtu)
 	}
 
 	if string(buffer[:n]) != message {
@@ -506,8 +499,7 @@ func TestSendUDSErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	addrParts := []string{UnixAddressPrefix, addr}
-	client, err := New(ConnAddr(strings.Join(addrParts, "")))
+	client, err := New(ConnAddr("unix://" + addr))
 	if err != nil {
 		t.Fatal(err)
 	}
