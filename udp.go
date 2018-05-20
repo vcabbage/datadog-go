@@ -54,6 +54,10 @@ func mtuByLocalAddr(local net.IP) int {
 		for _, addr := range addrs {
 			addr, ok := addr.(*net.IPNet)
 			if ok && addr.Contains(local) {
+				if iface.MTU == -1 {
+					// Windows loopback MTU may be reported as -1
+					return maxMTU - overhead
+				}
 				return iface.MTU - overhead
 			}
 		}
@@ -64,6 +68,7 @@ func mtuByLocalAddr(local net.IP) int {
 
 const (
 	typicalMTU   = 1500
+	maxMTU       = 65535 // technically IPv6 can be larger
 	ipv4Overhead = 20
 	ipv6Overhead = 40
 	udpOverhead  = 8
