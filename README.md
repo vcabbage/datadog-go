@@ -2,8 +2,6 @@
 
 This code was forked from [datadog-go](https://github.com/DataDog/datadog-go) with the purpose of improving performance and adjusting the API.
 
-
-
 ## Overview
 
 Package `dogstatsd` provides a Go [dogstatsd](https://docs.datadoghq.com/guides/dogstatsd/) client. Dogstatsd extends Statsd, adding tags
