@@ -1,25 +1,10 @@
 // Copyright 2013 Ooyala, Inc.
 
 /*
-Package statsd provides a Go dogstatsd client. Dogstatsd extends the popular statsd,
+Package dogstatsd provides a dogstatsd client. Dogstatsd extends the popular statsd,
 adding tags and histograms and pushing upstream to Datadog.
 
 Refer to http://docs.datadoghq.com/guides/dogstatsd/ for information about DogStatsD.
-
-Example Usage:
-
-    // Create the client
-    c, err := statsd.New("127.0.0.1:8125")
-    if err != nil {
-        log.Fatal(err)
-    }
-    // Prefix every metric with the app name
-    c.Namespace = "flubber."
-    // Send the EC2 availability zone as a tag with every metric
-    c.Tags = append(c.Tags, "us-east-1a")
-    err = c.Gauge("request.duration", 1.2, nil, 1)
-
-statsd is based on go-statsd-client.
 */
 package statsd
 
@@ -33,27 +18,29 @@ import (
 	"time"
 )
 
-// OptimalPayloadSize defines the optimal payload size for a UDP datagram, 1432 bytes
-// is optimal for regular networks with an MTU of 1500 so datagrams don't get
-// fragmented. It's generally recommended not to fragment UDP datagrams as losing
-// a single fragment will cause the entire datagram to be lost.
-//
-// This can be increased if your network has a greater MTU or you don't mind UDP
-// datagrams getting fragmented. The practical limit is MaxUDPPayloadSize
-const OptimalPayloadSize = 1432
+const (
+	// OptimalPayloadSize defines the optimal payload size for a UDP datagram, 1432 bytes
+	// is optimal for regular networks with an MTU of 1500 so datagrams don't get
+	// fragmented. It's generally recommended not to fragment UDP datagrams as losing
+	// a single fragment will cause the entire datagram to be lost.
+	//
+	// This can be increased if your network has a greater MTU or you don't mind UDP
+	// datagrams getting fragmented. The practical limit is MaxUDPPayloadSize
+	OptimalPayloadSize = 1432
 
-// MaxUDPPayloadSize defines the maximum payload size for a UDP datagram.
-// Its value comes from the calculation: 65535 bytes Max UDP datagram size -
-// 8byte UDP header - 60byte max IP headers
-// any number greater than that will see frames being cut out.
-const MaxUDPPayloadSize = 65467
+	// MaxUDPPayloadSize defines the maximum payload size for a UDP datagram.
+	// Its value comes from the calculation: 65535 bytes Max UDP datagram size -
+	// 8byte UDP header - 60byte max IP headers
+	// any number greater than that will see frames being cut out.
+	MaxUDPPayloadSize = 65467
 
-// UnixAddressPrefix holds the prefix to use to enable Unix Domain Socket
-// traffic instead of UDP.
-const UnixAddressPrefix = "unix://"
+	// UnixAddressPrefix holds the prefix to use to enable Unix Domain Socket
+	// traffic instead of UDP.
+	UnixAddressPrefix = "unix://"
 
-// DefaultAddr is used if no writer or address is provided.
-const DefaultAddr = "127.0.0.1:8125"
+	// DefaultAddr is used if no writer or address is provided.
+	DefaultAddr = "127.0.0.1:8125"
+)
 
 // Stat suffixes
 const (
@@ -90,30 +77,27 @@ type Client struct {
 	// skipErrors turns off error passing and allows UDS to emulate UDP behaviour
 	SkipErrors bool
 
-	maxCommands int
-	mtu         int
+	maxBuffer int
+	mtu       int
 
 	flushTime time.Duration
 
 	doneOnce sync.Once
 	done     chan struct{}
 
-	mu       sync.Mutex
-	buffer   []byte
-	commands int
-	timer    *time.Timer
+	mu     sync.Mutex
+	buffer []byte
+	timer  *time.Timer
 }
 
-// New returns a *Client given an addr in the format "hostname:port"
-// or "unix:///path/to/socket".
+// New returns a new Client.
 //
-// Buflen is the length of the buffer in number of commands.
+// If no options are provided, metrics will be sent unbuffered to 127.0.0.1:8125.
 func New(opts ...ConnOpt) (*Client, error) {
 	c := &Client{
-		opts:        opts,
-		maxCommands: 1,
-		flushTime:   100 * time.Millisecond,
-		done:        make(chan struct{}),
+		opts:      opts,
+		flushTime: 100 * time.Millisecond,
+		done:      make(chan struct{}),
 	}
 
 	for _, opt := range opts {
@@ -133,8 +117,10 @@ func New(opts ...ConnOpt) (*Client, error) {
 	return c, nil
 }
 
+// ConnOpt is a function for configuring a dogstatsd Client.
 type ConnOpt func(*Client) error
 
+// ConnAddr configures the address to send metrics to.
 func ConnAddr(addr string) ConnOpt {
 	return func(c *Client) error {
 		w, err := newWriter(addr)
@@ -145,13 +131,19 @@ func ConnAddr(addr string) ConnOpt {
 	}
 }
 
+// ConnBuffer sets the maximum buffer size before sending to
+// the server.
+//
+// You may need to adjust the dogstatsd_buffer_size options
+// in your DataDog server config.yaml.
 func ConnBuffer(size int) ConnOpt {
 	return func(c *Client) error {
-		c.maxCommands = size
+		c.maxBuffer = size
 		return nil
 	}
 }
 
+// ConnWriter sets the writer to write statistics to.
 func ConnWriter(w Writer) ConnOpt {
 	return func(c *Client) error {
 		c.writer = w
@@ -227,21 +219,28 @@ func (c *Client) append(buf []byte) error {
 	}
 
 	c.mu.Lock()
+
 	// check if mtu reached
-	if len(c.buffer)+1+len(buf) > c.mtu {
-		err := c.flushLocked(true)
+	newSize := len(c.buffer) + 1 + len(buf) // existing + newline + new
+	if newSize > c.mtu || (c.maxBuffer > 0 && newSize > c.maxBuffer) {
+		err := c.flushLocked()
 		if err != nil {
 			return err
 		}
 	}
 
 	// add to buffer
-	if c.commands > 0 {
+	if len(c.buffer) > 0 {
 		c.buffer = append(c.buffer, '\n')
 	}
 	c.buffer = append(c.buffer, buf...)
-	c.commands++
-	err := c.flushLocked(false)
+
+	// flush now if not buffered or reached maxBuffer
+	var err error
+	if c.maxBuffer <= 0 || newSize == c.maxBuffer {
+		err = c.flushLocked()
+	}
+
 	c.mu.Unlock()
 
 	return err
@@ -262,14 +261,14 @@ func (c *Client) Flush() error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.flushLocked(true)
+	return c.flushLocked()
 }
 
 // flush the commands in the buffer.
 //
 // c.mu must be held by caller.
-func (c *Client) flushLocked(force bool) error {
-	if c.commands == 0 || !force && c.commands < c.maxCommands {
+func (c *Client) flushLocked() error {
+	if len(c.buffer) == 0 {
 		return nil
 	}
 
@@ -279,9 +278,8 @@ func (c *Client) flushLocked(force bool) error {
 
 	_, err := c.writer.Write(c.buffer)
 	c.buffer = c.buffer[:0]
-	c.commands = 0
 
-	if c.maxCommands > 1 {
+	if c.maxBuffer > 0 {
 		c.timer = time.AfterFunc(c.flushTime, func() { c.Flush() })
 	}
 
@@ -339,7 +337,7 @@ func (c *Client) Set(name string, value string, rate float64, tags ...string) er
 
 // Timing sends timing information, it is an alias for TimeInMilliseconds
 func (c *Client) Timing(name string, value time.Duration, rate float64, tags ...string) error {
-	return c.TimeInMilliseconds(name, value.Seconds()*1000, rate, tags...)
+	return c.TimeInMilliseconds(name, float64(value/time.Millisecond), rate, tags...)
 }
 
 // TimeInMilliseconds sends timing information in milliseconds.
@@ -394,7 +392,7 @@ func (c *Client) Close() error {
 	}
 
 	// if this client is buffered, flush before closing the writer
-	if c.maxCommands > 0 {
+	if c.maxBuffer > 0 {
 		if err := c.Flush(); err != nil {
 			return err
 		}

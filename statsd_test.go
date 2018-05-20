@@ -209,8 +209,7 @@ func TestBufferedClient(t *testing.T) {
 	}
 	defer server.Close()
 
-	bufferLength := 9
-	client, err := New(ConnAddr(addr), ConnBuffer(bufferLength))
+	client, err := New(ConnAddr(addr), ConnBuffer(MaxUDPPayloadSize))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,20 +226,30 @@ func TestBufferedClient(t *testing.T) {
 	client.Timing("tt", 123*time.Microsecond, 1)
 	client.Set("ss", "ss", 1)
 
-	if client.commands != (bufferLength - 1) {
-		t.Errorf("Expected client to have buffered %d commands, but found %d\n", (bufferLength - 1), client.commands)
+	var size int
+	size += len("foo.ic:1|c|#dd:2")
+	size += len("\nfoo.dc:-1|c|#dd:2")
+	size += len("\nfoo.cc:1|c|#dd:2")
+	size += len("\nfoo.gg:10.000000|g|#dd:2")
+	size += len("\nfoo.hh:1.000000|h|#dd:2")
+	size += len("\nfoo.dd:1.000000|d|#dd:2")
+	size += len("\nfoo.tt:0.123000|ms|#dd:2")
+	size += len("\nfoo.ss:ss|s|#dd:2")
+
+	if len(client.buffer) != size {
+		t.Errorf("Expected client to have buffered %d bytes, but found %d\n", size, len(client.buffer))
 	}
 
 	client.Set("ss", "xx", 1)
 	client.mu.Lock()
-	err = client.flushLocked(true)
+	err = client.flushLocked()
 	client.mu.Unlock()
 	if err != nil {
 		t.Errorf("Error sending: %s", err)
 	}
 
-	if client.commands != 0 {
-		t.Errorf("Expecting send to flush commands, but found %d\n", client.commands)
+	if len(client.buffer) != 0 {
+		t.Errorf("Expecting send to flush buffer, but found %d\n", len(client.buffer))
 	}
 
 	buffer := make([]byte, 4096)
@@ -269,23 +278,31 @@ func TestBufferedClient(t *testing.T) {
 		}
 	}
 
-	client.Event(Event{Title: "title1", Text: "text1", Priority: Normal, AlertType: Success, Tags: []string{"tagg"}})
+	evt := Event{Title: "title1", Text: "text1", Priority: Normal, AlertType: Success, Tags: []string{"tagg"}}
+	client.Event(evt)
 	client.SimpleEvent("event1", "text1")
 
-	if client.commands != 2 {
-		t.Errorf("Expected to find %d commands, but found %d\n", 2, client.commands)
+	{
+		evt1, _ := evt.Encode(client.Tags...)
+		evt2, _ := NewEvent("event1", "text1").Encode(client.Tags...)
+		size = len(evt1)
+		size += 1 + len(evt2)
+	}
+
+	if len(client.buffer) != size {
+		t.Errorf("Expected to find %d bytes, but found %d\n", size, len(client.buffer))
 	}
 
 	client.mu.Lock()
-	err = client.flushLocked(true)
+	err = client.flushLocked()
 	client.mu.Unlock()
 
 	if err != nil {
 		t.Errorf("Error sending: %s", err)
 	}
 
-	if client.commands != 0 {
-		t.Errorf("Expecting send to flush commands, but found %d\n", client.commands)
+	if len(client.buffer) != 0 {
+		t.Errorf("Expecting send to flush buffer, but found %d\n", len(client.buffer))
 	}
 
 	buffer = make([]byte, 1024)
@@ -345,8 +362,8 @@ func TestBufferedClientBackground(t *testing.T) {
 
 	time.Sleep(client.flushTime * 2)
 	client.mu.Lock()
-	if client.commands != 0 {
-		t.Errorf("Watch goroutine should have flushed commands, but found %d\n", client.commands)
+	if len(client.buffer) != 0 {
+		t.Errorf("Watch goroutine should have flushed buffer, but found %d\n", len(client.buffer))
 	}
 	client.mu.Unlock()
 }
@@ -384,8 +401,8 @@ func TestBufferedClientFlush(t *testing.T) {
 	client.Flush()
 
 	client.mu.Lock()
-	if client.commands != 0 {
-		t.Errorf("Flush should have flushed commands, but found %d\n", client.commands)
+	if len(client.buffer) != 0 {
+		t.Errorf("Flush should have flushed buffer, but found %d\n", len(client.buffer))
 	}
 	client.mu.Unlock()
 }
@@ -451,7 +468,7 @@ func TestSendMsgUDP(t *testing.T) {
 	}
 
 	client.mu.Lock()
-	err = client.flushLocked(true)
+	err = client.flushLocked()
 	client.mu.Unlock()
 
 	if err != nil {
@@ -737,8 +754,8 @@ func TestFlushOnClose(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if client.commands != 1 {
-		t.Errorf("Commands buffer should contain 1 item, got %d", client.commands)
+	if len(client.buffer) != len(message) {
+		t.Errorf("Client buffer should contain %d bytes, got %d", len(message), len(client.buffer))
 	}
 
 	err = client.Close()
@@ -746,7 +763,7 @@ func TestFlushOnClose(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if client.commands != 0 {
-		t.Errorf("Commands buffer should be empty, got %d", client.commands)
+	if len(client.buffer) != 0 {
+		t.Errorf("Client buffer should be empty, got %d", len(client.buffer))
 	}
 }
