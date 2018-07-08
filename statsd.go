@@ -59,7 +59,7 @@ type Client struct {
 	Namespace string
 	// Tags are global tags to be added to every statsd call
 	Tags []string
-	// skipErrors turns off error passing and allows UDS to emulate UDP behaviour
+	// SkipErrors turns off error passing and allows UDS to emulate UDP behavior.
 	SkipErrors bool
 
 	maxBuffer int
@@ -164,7 +164,7 @@ func (c *Client) Clone() (*Client, error) {
 	cc.Tags = c.Tags
 	cc.SkipErrors = c.SkipErrors
 
-	return c, nil
+	return cc, nil
 }
 
 // format a message from its name, value, tags and rate. Also adds global namespace and tags.
